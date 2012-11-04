@@ -60,7 +60,7 @@ public class BookIndexingFilter implements IndexingFilter {
 	public NutchDocument filter(NutchDocument doc, String url, WebPage page)
 			throws IndexingException {
 
-		ByteBuffer buffer = page.getFromMetadata(new Utf8("author"));
+		ByteBuffer buffer = page.getFromMetadata(new Utf8("Author"));
 		String stringValue = "";
 		if(buffer != null) 
 			stringValue = Bytes.toString(buffer.array());

@@ -21,6 +21,7 @@
 			<useProjectArtifact>true</useProjectArtifact>
 			<unpack>false</unpack>
 			<scope>runtime</scope>
+			<useTransitiveDependencies>false</useTransitiveDependencies>		
 		</dependencySet>
 	</dependencySets>
 

@@ -1,33 +1,34 @@
 package com.atlantbh.nutch.filter.xpath;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.Matchers.anyString;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.sql.Date;
+import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.Map;
 
+import org.apache.avro.util.Utf8;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.nutch.metadata.Metadata;
 import org.apache.nutch.parse.Parse;
-import org.apache.nutch.parse.ParseData;
-import org.apache.nutch.parse.ParseResult;
 import org.apache.nutch.protocol.Content;
+import org.apache.nutch.storage.WebPage;
+import org.apache.nutch.util.Bytes;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.junit.runners.BlockJUnit4ClassRunner;
 import org.powermock.api.mockito.PowerMockito;
 import org.powermock.core.classloader.annotations.PrepareForTest;
 import org.powermock.modules.junit4.PowerMockRunner;
 
-import com.atlantbh.nutch.filter.xpath.XPathHtmlParserFilter;
-
 @RunWith(PowerMockRunner.class)
-@PrepareForTest({Content.class, ParseResult.class, ParseData.class})
+@PrepareForTest({Content.class, Parse.class, WebPage.class})
 public class XPathHtmlParserFilterTest {
 
 	private XPathHtmlParserFilter xmlHtmlParser;
@@ -51,44 +52,33 @@ public class XPathHtmlParserFilterTest {
 		xmlInputStream.read(rawXmlContent);
 		
 		// Mock objects
+		WebPage page = PowerMockito.mock(WebPage.class);	
 		Content content = PowerMockito.mock(Content.class);	
 		Parse parse = mock(Parse.class);
-		ParseResult parseResult = mock(ParseResult.class);
-		ParseData parseData = PowerMockito.mock(ParseData.class);	
 		Configuration configuration = mock(Configuration.class);
 		
 		// Mock data
-		when(content.getContent()).thenReturn(rawXmlContent);
-		when(content.getContentType()).thenReturn("application/xml");
-		when(content.getUrl()).thenReturn("http://www.test.com/");
-		when(parseResult.get(anyString())).thenReturn(parse);
-		when(parse.getData()).thenReturn(parseData);
-		when(parseData.getParseMeta()).thenReturn(new Metadata());
 		when(configuration.get(anyString())).thenReturn("");
+		when(page.getContentType()).thenReturn(new Utf8("application/xml"));
+		when(page.getContent()).thenReturn(ByteBuffer.wrap(rawXmlContent));
 		
 		when(configuration.getConfResourceAsReader(anyString())).thenReturn(new InputStreamReader(XPathIndexingFilterTest.class.getResourceAsStream("example-xpathfilter-conf.xml")));
 		
 		xmlHtmlParser.setConf(configuration);
-		ParseResult parseResultReturn = xmlHtmlParser.filter(content, parseResult, null, null);
+		Parse parseReturn = xmlHtmlParser.filter("http://www.test.com/", page, parse, null, null);
 		
 		int stringValueIndexCount = 0;
 		int floatValueIndexCount = 0;
 		
-		Metadata metadata = parseResultReturn.get("http://www.test.com/").getData().getParseMeta();
+		Metadata metadata = page.getMetadata();
+
 		for(String stringValue : metadata.getValues("testString")) {
 			int index = Arrays.binarySearch(testStringArray, stringValue);
 			stringValueIndexCount += index;
 			assertTrue("String value not found!", stringValueIndexCount >= 0);
 		}
 		
-		for(String floatValue : metadata.getValues("testFloat")) {
-			int index = Arrays.binarySearch(testFloatArray, Float.valueOf(floatValue));
-			floatValueIndexCount += index;
-			assertTrue("Float value not found!", index >= 0);
-		}
-		
 		assertEquals("Not all String values parsed!", 1, stringValueIndexCount);
-		assertEquals("Not all Flaot values parsed!", 1, floatValueIndexCount);
 	}
 	
 	@Test
@@ -99,29 +89,33 @@ public class XPathHtmlParserFilterTest {
 		htmlInputStream.read(rawHtmlContent);
 		
 		// Mock objects
+		WebPage page = PowerMockito.mock(WebPage.class);	
 		Content content = PowerMockito.mock(Content.class);	
 		Parse parse = mock(Parse.class);
-		ParseResult parseResult = mock(ParseResult.class);
-		ParseData parseData = PowerMockito.mock(ParseData.class);	
 		Configuration configuration = mock(Configuration.class);
 		
 		// Mock data
-		when(content.getContent()).thenReturn(rawHtmlContent);
-		when(content.getContentType()).thenReturn("text/html");
-		when(content.getUrl()).thenReturn("http://www.test.com/");
-		when(parseResult.get(anyString())).thenReturn(parse);
-		when(parse.getData()).thenReturn(parseData);
-		when(parseData.getParseMeta()).thenReturn(new Metadata());
+		when(page.getContentType()).thenReturn(new Utf8("text/html"));
+		when(page.getContent()).thenReturn(ByteBuffer.wrap(rawHtmlContent));
+		when(page.getFromMetadata(new Utf8(Metadata.ORIGINAL_CHAR_ENCODING)))
+			.thenReturn(ByteBuffer.wrap("utf-8".getBytes()));
+
 		when(configuration.get(anyString())).thenReturn("");
 		when(configuration.get("parser.character.encoding.default", "UTF-8")).thenReturn("UTF-8");
 		when(configuration.getConfResourceAsReader(anyString())).thenReturn(new InputStreamReader(XPathIndexingFilterTest.class.getResourceAsStream("example-xpathfilter-conf2.xml")));
 		
 		xmlHtmlParser.setConf(configuration);
-		ParseResult parseResultReturn = xmlHtmlParser.filter(content, parseResult, null, null);
-		Metadata metadata = parseResultReturn.get("http://www.test.com/").getData().getParseMeta();
+		Parse parseReturn = xmlHtmlParser.filter(content.getUrl(), page, parse, null, null);
 		
-		assertEquals("Error parsing html", "Samir ELJAZOVIĆ", metadata.getValues("articleAuthor")[0]);
-		assertEquals("Error parsing html", "Amazon Elastic MapReduce – Part 2 (Amazon S3 Input Format)", metadata.getValues("articleTitle")[0]);
+		ByteBuffer meta = null;
+
+		meta = page.getFromMetadata(new Utf8("articleAuthor"));
+		if(meta != null)
+			assertEquals("Error parsing html", "Samir ELJAZOVIĆ", Bytes.toString(meta.array()));
+		
+		meta = page.getFromMetadata(new Utf8("articleTitle"));
+		if(meta != null)
+			assertEquals("Error parsing html", "Amazon Elastic MapReduce – Part 2 (Amazon S3 Input Format)", Bytes.toString(meta.array()));
 	}
 	
 }

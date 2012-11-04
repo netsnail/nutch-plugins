@@ -1,20 +1,22 @@
 package com.atlantbh.nutch.filter.xpath;
 
+import java.nio.ByteBuffer;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.util.Collection;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
 
+import org.apache.avro.util.Utf8;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.io.Text;
 import org.apache.log4j.Logger;
-import org.apache.nutch.crawl.CrawlDatum;
-import org.apache.nutch.crawl.Inlinks;
 import org.apache.nutch.indexer.IndexingException;
 import org.apache.nutch.indexer.IndexingFilter;
 import org.apache.nutch.indexer.NutchDocument;
-import org.apache.nutch.metadata.Metadata;
-import org.apache.nutch.parse.Parse;
+import org.apache.nutch.storage.WebPage;
+import org.apache.nutch.storage.WebPage.Field;
+import org.apache.nutch.util.Bytes;
 
 import com.atlantbh.nutch.filter.xpath.config.FieldType;
 import com.atlantbh.nutch.filter.xpath.config.XPathFilterConfiguration;
@@ -42,6 +44,12 @@ public class XPathIndexingFilter implements IndexingFilter {
 	private Configuration configuration;
 	private XPathFilterConfiguration xpathFilterConfiguration;
 	
+	private static final Collection<WebPage.Field> FIELDS = new HashSet<WebPage.Field>();
+
+	static {
+		  FIELDS.add(WebPage.Field.METADATA);
+	}	
+	
 	public XPathIndexingFilter() {}
 	
 	private void initConfig() {
@@ -62,67 +70,31 @@ public class XPathIndexingFilter implements IndexingFilter {
 	}
 
 	@Override
-	public NutchDocument filter(NutchDocument doc, Parse parse, Text url, CrawlDatum datum, Inlinks inlinks) throws IndexingException {
-		Metadata metadata = parse.getData().getParseMeta();
-		
+	public NutchDocument filter(NutchDocument doc, String url, WebPage page)
+			throws IndexingException {
 		List<XPathIndexerProperties> xPathIndexerPropertiesList = xpathFilterConfiguration.getXPathIndexerPropertiesList();
 		for(XPathIndexerProperties xPathIndexerProperties : xPathIndexerPropertiesList) {
 			
-			if(FilterUtils.isMatch(xPathIndexerProperties.getPageUrlFilterRegex(), new String(url.getBytes()).substring(0, url.getLength()))) {
-				
+			if(FilterUtils.isMatch(xPathIndexerProperties.getPageUrlFilterRegex(), url)) {
+
 				List<XPathIndexerPropertiesField> xPathIndexerPropertiesFieldList = xPathIndexerProperties.getXPathIndexerPropertiesFieldList();
 				for(XPathIndexerPropertiesField xPathIndexerPropertiesField : xPathIndexerPropertiesFieldList) {
 					
-					FieldType type = xPathIndexerPropertiesField.getType();
-					for(String stringValue : metadata.getValues(xPathIndexerPropertiesField.getName())) {
+					ByteBuffer buffer = page.getFromMetadata(new Utf8(xPathIndexerPropertiesField.getName()));
+					String stringValue = "";
+					if(buffer != null) 
+						stringValue = Bytes.toString(buffer.array());
 						
-						Object value;
-						switch(type) {
-							case STRING:
-								value = stringValue;
-								break;
-							case INTEGER:
-								value = Integer.valueOf(stringValue);
-								break;
-							case LONG:
-								value = Long.valueOf(stringValue);
-								break;
-							case DOUBLE:
-								value = Double.valueOf(stringValue);
-								break;
-							case FLOAT:
-								value = Float.valueOf(stringValue);
-								break;
-							case BOOLEAN:
-								value = Boolean.valueOf(stringValue);
-								break;
-							case DATE:
-								
-								// Create SimpleDateFormat object to parse string
-								String dateFormat = xPathIndexerPropertiesField.getDateFormat() == null?"dd.MM.yyyy":xPathIndexerPropertiesField.getDateFormat();
-								SimpleDateFormat simpleDateFormat = new SimpleDateFormat(dateFormat);
-								
-								// If not parseable set the date: 1. January 1970.
-								try {
-									value = simpleDateFormat.parseObject(stringValue);
-								} catch (ParseException e) {
-									value = new Date(0);
-								} 
-								
-								break;
-							default:	
-								value = stringValue;
-								break;
-						} 
-						
-						// Add field
-						doc.add(xPathIndexerPropertiesField.getName(), value);
-						
-					}
+					doc.add(xPathIndexerPropertiesField.getName(), stringValue);
 				}
 			}
 		}
 		
 		return doc;
+	}
+
+	@Override
+	public Collection<Field> getFields() {
+		return FIELDS;
 	}
 }

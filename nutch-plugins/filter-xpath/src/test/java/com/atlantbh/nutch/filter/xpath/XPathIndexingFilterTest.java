@@ -12,18 +12,15 @@ import java.util.Arrays;
 import java.util.Date;
 
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.io.Text;
 import org.apache.nutch.indexer.IndexingException;
 import org.apache.nutch.indexer.NutchDocument;
 import org.apache.nutch.metadata.Metadata;
 import org.apache.nutch.parse.Parse;
-import org.apache.nutch.parse.ParseData;
+import org.apache.nutch.storage.WebPage;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.BlockJUnit4ClassRunner;
-
-import com.atlantbh.nutch.filter.xpath.XPathIndexingFilter;
 
 @RunWith(BlockJUnit4ClassRunner.class)
 public class XPathIndexingFilterTest {
@@ -56,18 +53,16 @@ public class XPathIndexingFilterTest {
 		
 		// Prepare data
 		NutchDocument nutchDocumentIn = new NutchDocument();
+		WebPage page = mock(WebPage.class);
 		Parse parse = mock(Parse.class);
-		ParseData parseData = new ParseData();
-		parseData.setParseMeta(metadata);
 		Configuration configuration = mock(Configuration.class);
 		
 		// Mock data
-		when(parse.getData()).thenReturn(parseData);
 		when(configuration.get(anyString())).thenReturn("");
 		when(configuration.getConfResourceAsReader(anyString())).thenReturn(new InputStreamReader(XPathIndexingFilterTest.class.getResourceAsStream("example-xpathfilter-conf.xml")));
 		
 		xmlHtmlIndexingFilter.setConf(configuration);
-		NutchDocument nutchDocumentOut = xmlHtmlIndexingFilter.filter(nutchDocumentIn, parse, new Text("www.test.com"), null, null);
+		NutchDocument nutchDocumentOut = xmlHtmlIndexingFilter.filter(nutchDocumentIn, "http://www.test.com/", page);
 		
 		int stringValueIndexCount = 0;
 		int floatValueIndexCount = 0;
@@ -75,7 +70,7 @@ public class XPathIndexingFilterTest {
 		
 		for(String fieldName : nutchDocumentOut.getFieldNames()) {
 			
-			for(Object value : nutchDocumentOut.getField(fieldName).getValues()) {
+			for(String value : nutchDocumentOut.getFieldValues(fieldName)) {
 				
 				if(fieldName.equals("testString")) {
 					int index = Arrays.binarySearch(testStringArray, value);
@@ -83,19 +78,7 @@ public class XPathIndexingFilterTest {
 					
 					assertTrue(index >= 0);
 					assertTrue(value instanceof String);
-				} else if(fieldName.equals("testFloat"))  {
-					int index = Arrays.binarySearch(testFloatArray, value);
-					floatValueIndexCount += index;
-					
-					assertTrue(index >= 0);
-					assertTrue(value instanceof Float);
-				} else if(fieldName.equals("testDate"))  {	
-					int index = Arrays.binarySearch(testDateArray, value);	
-					dateValueIndexCount += index;
-					
-					assertTrue(index >= 0);
-					assertTrue(value instanceof Date);
-				}
+				} 
 			}		
 		}
 		

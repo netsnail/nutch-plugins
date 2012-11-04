@@ -4,23 +4,35 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
+import java.io.UnsupportedEncodingException;
+import java.nio.ByteBuffer;
+import java.nio.charset.Charset;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 
+import org.apache.avro.util.Utf8;
 import org.apache.commons.lang.StringEscapeUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.log4j.Logger;
 import org.apache.nutch.metadata.Metadata;
 import org.apache.nutch.parse.HTMLMetaTags;
-import org.apache.nutch.parse.HtmlParseFilter;
-import org.apache.nutch.parse.ParseResult;
-import org.apache.nutch.parse.ParseStatus;
-import org.apache.nutch.protocol.Content;
+import org.apache.nutch.parse.Parse;
+import org.apache.nutch.parse.ParseFilter;
+import org.apache.nutch.parse.ParseStatusCodes;
+import org.apache.nutch.parse.ParseStatusUtils;
+import org.apache.nutch.storage.WebPage;
+import org.apache.nutch.storage.WebPage.Field;
+import org.apache.nutch.util.Bytes;
+import org.apache.nutch.util.EncodingDetector;
 import org.htmlcleaner.CleanerProperties;
 import org.htmlcleaner.DomSerializer;
 import org.htmlcleaner.HtmlCleaner;
@@ -30,6 +42,8 @@ import org.jaxen.XPath;
 import org.jaxen.dom.DOMXPath;
 import org.w3c.dom.Document;
 import org.w3c.dom.DocumentFragment;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
 
@@ -47,7 +61,7 @@ import com.atlantbh.nutch.filter.xpath.config.XPathIndexerPropertiesField;
  * @version 1.4
  * @since Apache Nutch 1.4
  */
-public class XPathHtmlParserFilter implements HtmlParseFilter {
+public class XPathHtmlParserFilter implements ParseFilter {
 	
 	// Constants
 	private static final Logger log = Logger.getLogger(XPathHtmlParserFilter.class);
@@ -60,6 +74,12 @@ public class XPathHtmlParserFilter implements HtmlParseFilter {
 	private Configuration configuration;
 	private XPathFilterConfiguration xpathFilterConfiguration;
 	private String defaultEncoding;
+	
+	private static final Collection<WebPage.Field> FIELDS = new HashSet<WebPage.Field>();
+
+	static {
+	    FIELDS.add(WebPage.Field.METADATA);
+	}
 	
 	// Internal data
 	private HtmlCleaner cleaner;
@@ -111,26 +131,50 @@ public class XPathHtmlParserFilter implements HtmlParseFilter {
 		initConfig(); 
 	}
 	
+	private void removeAll(Node node, short nodeType, String name) {
+	    if (node.getNodeType() == nodeType && (name == null || node.getNodeName().equals(name))) {
+	    	node.getParentNode().removeChild(node);
+	    } 
+	    else {
+	    	NodeList list = node.getChildNodes();
+	    	for (int i = 0; i < list.getLength(); i++) {
+	    		removeAll(list.item(i), nodeType, name);
+	    	}
+	    }
+	}
+	
+	
 	@Override
-	public ParseResult filter(Content content, ParseResult parseResult, HTMLMetaTags metaTags, DocumentFragment doc) {
-		Metadata metadata = parseResult.get(content.getUrl()).getData().getParseMeta();
-		byte[] rawContent = content.getContent();
+	public Parse filter(String url, WebPage page, Parse parse,
+			HTMLMetaTags metaTags, DocumentFragment doc) {
+
+		byte[] rawContent = page.getContent().array();
 		
 		try {
 			Document cleanedXmlHtml = documentBuilder.newDocument();
-			if(htmlMimeTypes.contains(content.getContentType())) {
+			if(htmlMimeTypes.contains(page.getContentType().toString())) {
+		
+				
+				String encoding = defaultEncoding;
+				ByteBuffer buffer = page.getFromMetadata(new Utf8(Metadata.ORIGINAL_CHAR_ENCODING));
+				if(buffer != null)
+					encoding = Bytes.toString(buffer.array());
 				
 				// Create reader so the input can be read in UTF-8
-				Reader rawContentReader = new InputStreamReader(new ByteArrayInputStream(rawContent), FilterUtils.getNullSafe(metadata.get(Metadata.ORIGINAL_CHAR_ENCODING), defaultEncoding));
+				Reader rawContentReader = new InputStreamReader(new ByteArrayInputStream(rawContent), encoding);
 				
 				// Use the cleaner to "clean" the HTML and return it as a TagNode object
 				TagNode tagNode = cleaner.clean(rawContentReader);
 				cleanedXmlHtml = domSerializer.createDOM(tagNode);
-			} else if(content.getContentType().contains(new StringBuilder("/xml")) || content.getContentType().contains(new StringBuilder("+xml"))) {
+			} else if(page.getContentType().toString().contains(new StringBuilder("/xml")) || page.getContentType().toString().contains(new StringBuilder("+xml"))) {
 				
 				// Parse as xml - don't clean
 				cleanedXmlHtml = documentBuilder.parse(new InputSource(new ByteArrayInputStream(rawContent)));	
 			} 
+			
+			removeAll(cleanedXmlHtml, Node.ELEMENT_NODE, "script");
+			
+			cleanedXmlHtml.normalize();
 			
 			// Once the HTML is cleaned, then you can run your XPATH expressions on the node, 
 			// which will then return an array of TagNode objects 
@@ -141,7 +185,7 @@ public class XPathHtmlParserFilter implements HtmlParseFilter {
 				//****************************
 				// CORE XPATH EVALUATION
 				//****************************
-				if(pageToProcess(xPathIndexerProperties, cleanedXmlHtml, content.getUrl())) {
+				if(pageToProcess(xPathIndexerProperties, cleanedXmlHtml, page.getBaseUrl().toString())) {
 					
 					List<XPathIndexerPropertiesField> xPathIndexerPropertiesFieldList = xPathIndexerProperties.getXPathIndexerPropertiesFieldList();
 					for(XPathIndexerPropertiesField xPathIndexerPropertiesField : xPathIndexerPropertiesFieldList) {
@@ -176,7 +220,7 @@ public class XPathHtmlParserFilter implements HtmlParseFilter {
 							
 							// Add the extracted data to meta
 							if(value != null) {
-								metadata.add(xPathIndexerPropertiesField.getName(), value);
+								page.putToMetadata(new Utf8(xPathIndexerPropertiesField.getName()), ByteBuffer.wrap(value.getBytes()));
 							}
 							
 						} else {
@@ -188,7 +232,7 @@ public class XPathHtmlParserFilter implements HtmlParseFilter {
 								String value = FilterUtils.extractTextContentFromRawNode(node);					
 								value = filterValue(value, trim);
 								if(value != null) {
-									metadata.add(xPathIndexerPropertiesField.getName(), value);	
+								    page.putToMetadata(new Utf8(xPathIndexerPropertiesField.getName()), ByteBuffer.wrap(value.getBytes()));
 								}
 							}
 						}
@@ -202,22 +246,22 @@ public class XPathHtmlParserFilter implements HtmlParseFilter {
 		} catch(PatternSyntaxException e) {
 			System.err.println(e.getMessage());
 			log.error("Error parsing urlRegex: " + e.getMessage());
-			return new ParseStatus(ParseStatus.FAILED, "Error parsing urlRegex: " + e.getMessage()).getEmptyParseResult(content.getUrl(), configuration);
+			return ParseStatusUtils.getEmptyParse(ParseStatusCodes.FAILED, page.getBaseUrl().toString(), configuration);
 		} catch (ParserConfigurationException e) {
 			System.err.println(e.getMessage());
 			log.error("HTML Cleaning error: " + e.getMessage());
-			return new ParseStatus(ParseStatus.FAILED, "HTML Cleaning error: " + e.getMessage()).getEmptyParseResult(content.getUrl(), configuration);
+			return ParseStatusUtils.getEmptyParse(ParseStatusCodes.FAILED, page.getBaseUrl().toString(), configuration);
 		} catch (SAXException e) {
 			System.err.println(e.getMessage());
 			log.error("XML parsing error: " + e.getMessage());
-			return new ParseStatus(ParseStatus.FAILED, "XML parsing error: " + e.getMessage()).getEmptyParseResult(content.getUrl(), configuration);
+			return ParseStatusUtils.getEmptyParse(ParseStatusCodes.FAILED, page.getBaseUrl().toString(), configuration);
 		} catch (JaxenException e) {
 			System.err.println(e.getMessage());
 			log.error("XPath error: " + e.getMessage());
-			return new ParseStatus(ParseStatus.FAILED, "XPath error: " + e.getMessage()).getEmptyParseResult(content.getUrl(), configuration);
+			return ParseStatusUtils.getEmptyParse(ParseStatusCodes.FAILED, page.getBaseUrl().toString(), configuration);
 		}
 		
-		return parseResult;
+		return parse;
 	}
 	
 	
@@ -307,5 +351,10 @@ public class XPathHtmlParserFilter implements HtmlParseFilter {
 		}
 		
 		return returnValue;
+	}
+
+	@Override
+	public Collection<Field> getFields() {
+		return FIELDS;
 	}
 }

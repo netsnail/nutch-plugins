@@ -40,14 +40,6 @@ public class XPathIndexerPropertiesField {
 		this.xPath = xPath;
 	}
 
-	@XmlAttribute(name="type", required=true)
-	public FieldType getType() {
-		return type;
-	}
-	public void setType(FieldType type) {
-		this.type = type;
-	}
-
 	@XmlAttribute(name="dateFormat", required=false)
 	public String getDateFormat() {
 		return dateFormat;

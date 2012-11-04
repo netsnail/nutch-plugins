@@ -68,12 +68,10 @@ public class XPathHtmlParserFilterTest {
 		Parse parseReturn = xmlHtmlParser.filter("http://www.test.com/", page, parse, null, null);
 		
 		int stringValueIndexCount = 0;
-		int floatValueIndexCount = 0;
 		
-		Metadata metadata = page.getMetadata();
-
-		for(String stringValue : metadata.getValues("testString")) {
-			int index = Arrays.binarySearch(testStringArray, stringValue);
+		ByteBuffer metadata = page.getFromMetadata(new Utf8("testString"));
+		if(metadata != null) {
+			int index = Arrays.binarySearch(testStringArray, Bytes.toString(metadata.array()));
 			stringValueIndexCount += index;
 			assertTrue("String value not found!", stringValueIndexCount >= 0);
 		}

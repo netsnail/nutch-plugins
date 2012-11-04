@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<plugin id="index-book" name="Apache Nutch Index Book Filter" version="1.4" provider-name="nutch.org">
+
+   	<runtime>
+      	<library name="index-book.jar">
+         	<export name="*"/>
+      	</library>
+      	<library name="commons-lang.jar"/>
+      	<library name="ant.jar"/>
+      	<library name="ant-luncher.jar"/>
+      	<library name="log4j.jar"/>
+   	</runtime>
+
+   	<requires>
+      	<import plugin="nutch-extensionpoints"/>
+   	</requires>
+
+   	<extension id="org.apache.nutch.indexer" name="Nutch Book Indexing Filter" point="org.apache.nutch.indexer.IndexingFilter">
+      	<implementation id="com.atlantbh.nutch.index.BookIndexingFilter" class="com.atlantbh.nutch.index.book.BookIndexingFilter"/>
+   	</extension>
+
+</plugin>
